@@ -74,20 +74,11 @@ export abstract class Behavior<A> extends Reactive<A> implements Observer<A>, Mo
   }
   flatten: <B>() => Behavior<B>;
   at(): A {
-    return this.state === State.Push ? this.last : this.pull();
-  }
-  push(a: any): void {
-    this.last = this.pull();
-    this.child.push(this.last);
-  }
-  pull(): A {
+    this.pull();
     return this.last;
   }
   activate(): void {
     super.activate();
-    if (this.state === State.Push) {
-      this.last = this.pull();
-    }
   }
   changePullers(n: number): void {
     this.nrOfPullers += n;
@@ -114,6 +105,7 @@ export abstract class ProducerBehavior<A> extends Behavior<A> {
       this.child.push(a);
     }
   }
+  pull(): void { } // A producer is always push so we don't need to implement pull
   changePullers(n: number): void {
     this.nrOfPullers += n;
     if (this.nrOfPullers > 0 && this.state === State.Inactive) {
@@ -187,23 +179,20 @@ export function at<B>(b: Behavior<B>): B {
 }
 
 export class MapBehavior<A, B> extends Behavior<B> {
-  private oldVal: A;
-  private cached: B;
   constructor(private parent: Behavior<any>, private f: (a: A) => B) {
     super();
     this.parents = cons(parent);
   }
   push(a: A): void {
-    this.last = this.f(a);
-    this.child.push(this.last);
-  }
-  pull(): B {
-    const newVal = this.parent.at();
-    if (this.oldVal !== newVal) {
-      this.oldVal = newVal;
-      this.cached = this.f(newVal);
+    const b = this.f(a);
+    if (b === this.last) {
+      return;
     }
-    return this.cached;
+    this.last = b;
+    this.child.push(b);
+  }
+  pull(): void {
+    this.parent.pull();
   }
   semantic(): SemanticBehavior<B> {
     const g = this.parent.semantic();
@@ -219,14 +208,19 @@ class ApBehavior<A, B> extends Behavior<B> {
     super();
     this.parents = cons<any>(fn, cons(val));
   }
+  private cacheFn: (a: A) => B;
+  private cacheVal: A;
   push(): void {
     const fn = at(this.fn);
     const val = at(this.val);
+    if (fn === this.cacheFn && val === this.cacheVal) {
+      return;
+    }
     this.last = fn(val);
     this.child.push(this.last);
   }
-  pull(): B {
-    return this.fn.at()(this.val.at());
+  pull(): void {
+    this.push();
   }
 }
 
@@ -251,6 +245,9 @@ class ChainOuter<A> extends Behavior<A> {
   }
   push(a: A): void {
     this.child.pushOuter(a);
+  }
+  pull(): void {
+    this.parent.pull();
   }
 }
 
@@ -297,74 +294,74 @@ class ChainBehavior<A, B> extends Behavior<B> {
     this.last = b;
     this.child.push(b);
   }
-  pull(): B {
-    return this.fn(this.outer.at()).at();
+  pull(): void {
+    this.fn(this.outer.at()).pull();
   }
 }
 
-/** @private */
-class WhenBehavior extends Behavior<Future<{}>> {
-  constructor(private parent: Behavior<boolean>) {
-    super();
-    this.push(at(parent));
-  }
-  push(val: boolean): void {
-    if (val === true) {
-      this.last = Future.of({});
-    } else {
-      this.last = new BehaviorFuture(this.parent);
-    }
-  }
-  pull(): Future<{}> {
-    return this.last;
-  }
-}
+// /** @private */
+// class WhenBehavior extends Behavior<Future<{}>> {
+//   constructor(private parent: Behavior<boolean>) {
+//     super();
+//     this.push(at(parent));
+//   }
+//   push(val: boolean): void {
+//     if (val === true) {
+//       this.last = Future.of({});
+//     } else {
+//       this.last = new BehaviorFuture(this.parent);
+//     }
+//   }
+//   pull(): Future<{}> {
+//     return this.last;
+//   }
+// }
 
-export function when(b: Behavior<boolean>): Behavior<Future<{}>> {
-  return new WhenBehavior(b);
-}
+// export function when(b: Behavior<boolean>): Behavior<Future<{}>> {
+//   return new WhenBehavior(b);
+// }
 
-// FIXME: This can probably be made less ugly.
-/** @private */
-class SnapshotBehavior<A> extends Behavior<Future<A>> {
-  private afterFuture: boolean;
-  constructor(private parent: Behavior<A>, future: Future<any>) {
-    super();
-    if (future.state === State.Done) {
-      // Future has occurred at some point in the past
-      this.afterFuture = true;
-      this.state = parent.state;
-      parent.addListener(this);
-      this.last = Future.of(at(parent));
-    } else {
-      this.afterFuture = false;
-      this.state = State.Push;
-      this.last = F.sinkFuture<A>();
-      future.addListener(this);
-    }
-  }
-  push(val: any): void {
-    if (this.afterFuture === false) {
-      // The push is coming from the Future, it has just occurred.
-      this.afterFuture = true;
-      this.last.resolve(at(this.parent));
-      this.parent.addListener(this);
-    } else {
-      // We are receiving an update from `parent` after `future` has
-      // occurred.
-      this.last = Future.of(val);
-    }
-  }
-  pull(): Future<A> {
-    return this.last;
-  }
-}
+// // FIXME: This can probably be made less ugly.
+// /** @private */
+// class SnapshotBehavior<A> extends Behavior<Future<A>> {
+//   private afterFuture: boolean;
+//   constructor(private parent: Behavior<A>, future: Future<any>) {
+//     super();
+//     if (future.state === State.Done) {
+//       // Future has occurred at some point in the past
+//       this.afterFuture = true;
+//       this.state = parent.state;
+//       parent.addListener(this);
+//       this.last = Future.of(at(parent));
+//     } else {
+//       this.afterFuture = false;
+//       this.state = State.Push;
+//       this.last = F.sinkFuture<A>();
+//       future.addListener(this);
+//     }
+//   }
+//   push(val: any): void {
+//     if (this.afterFuture === false) {
+//       // The push is coming from the Future, it has just occurred.
+//       this.afterFuture = true;
+//       this.last.resolve(at(this.parent));
+//       this.parent.addListener(this);
+//     } else {
+//       // We are receiving an update from `parent` after `future` has
+//       // occurred.
+//       this.last = Future.of(val);
+//     }
+//   }
+//   pull(): Future<A> {
+//     return this.last;
+//   }
+// }
 
-export function snapshotAt<A>(
-  b: Behavior<A>, f: Future<any>
-): Behavior<Future<A>> {
-  return new SnapshotBehavior(b, f);
-}
+// export function snapshotAt<A>(
+//   b: Behavior<A>, f: Future<any>
+// ): Behavior<Future<A>> {
+//   return new SnapshotBehavior(b, f);
+// }
 
 /** Behaviors that are always active */
 export abstract class ActiveBehavior<A> extends Behavior<A> {
@@ -386,6 +383,8 @@ export class ConstantBehavior<A> extends ActiveBehavior<A> {
     super();
     this.state = State.Push;
   }
+  push(): void {}
+  pull(): void {}
   semantic(): SemanticBehavior<A> {
     return (_) => this.last;
   }
@@ -397,8 +396,11 @@ export class FunctionBehavior<A> extends ActiveBehavior<A> {
     super();
     this.state = State.OnlyPull;
   }
-  pull(): A {
-    return this.fn();
+  push(): void {
+    this.child.push(this.fn());
+  }
+  pull(): void {
+    this.push();
   }
 }
 
@@ -406,221 +408,221 @@ export function fromFunction<B>(fn: () => B): Behavior<B> {
   return new FunctionBehavior(fn);
 }
 
-/** @private */
-class SwitcherBehavior<A> extends ActiveBehavior<A> {
-  constructor(
-    private b: Behavior<A>,
-    next: Future<Behavior<A>> | Stream<Behavior<A>>
-  ) {
-    super();
-    b.addListener(this);
-    this.state = b.state;
-    if (this.state === State.Push) {
-      this.last = at(b);
-    }
-    // FIXME: Using `bind` is hardly optimal for performance.
-    next.subscribe(this.doSwitch.bind(this));
-  }
-  push(val: A): void {
-    this.last = val;
-    if (this.child !== undefined) {
-      this.child.push(val);
-    }
-  }
-  pull(): A {
-    return at(this.b);
-  }
-  private doSwitch(newB: Behavior<A>): void {
-    this.b.removeListener(this);
-    this.b = newB;
-    newB.addListener(this);
-    const newState = newB.state;
-    if (newState === State.Push) {
-      this.push(newB.at());
-    }
-    this.state = newState;
-    if (this.child !== undefined) {
-      this.child.changeStateDown(this.state);
-    }
-  }
-}
+// /** @private */
+// class SwitcherBehavior<A> extends ActiveBehavior<A> {
+//   constructor(
+//     private b: Behavior<A>,
+//     next: Future<Behavior<A>> | Stream<Behavior<A>>
+//   ) {
+//     super();
+//     b.addListener(this);
+//     this.state = b.state;
+//     if (this.state === State.Push) {
+//       this.last = at(b);
+//     }
+//     // FIXME: Using `bind` is hardly optimal for performance.
+//     next.subscribe(this.doSwitch.bind(this));
+//   }
+//   push(val: A): void {
+//     this.last = val;
+//     if (this.child !== undefined) {
+//       this.child.push(val);
+//     }
+//   }
+//   pull(): A {
+//     return at(this.b);
+//   }
+//   private doSwitch(newB: Behavior<A>): void {
+//     this.b.removeListener(this);
+//     this.b = newB;
+//     newB.addListener(this);
+//     const newState = newB.state;
+//     if (newState === State.Push) {
+//       this.push(newB.at());
+//     }
+//     this.state = newState;
+//     if (this.child !== undefined) {
+//       this.child.changeStateDown(this.state);
+//     }
+//   }
+// }
 
-/**
- * From an initial behavior and a future of a behavior, `switcher`
- * creates a new behavior that acts exactly like `initial` until
- * `next` occurs, after which it acts like the behavior it contains.
- */
-export function switchTo<A>(
-  init: Behavior<A>,
-  next: Future<Behavior<A>>
-): Behavior<A> {
-  return new SwitcherBehavior(init, next);
-}
+// /**
+//  * From an initial behavior and a future of a behavior, `switcher`
+//  * creates a new behavior that acts exactly like `initial` until
+//  * `next` occurs, after which it acts like the behavior it contains.
+//  */
+// export function switchTo<A>(
+//   init: Behavior<A>,
+//   next: Future<Behavior<A>>
+// ): Behavior<A> {
+//   return new SwitcherBehavior(init, next);
+// }
 
-export function switcher<A>(
-  init: Behavior<A>, stream: Stream<Behavior<A>>
-): Behavior<Behavior<A>> {
-  return fromFunction(() => new SwitcherBehavior(init, stream));
-}
+// export function switcher<A>(
+//   init: Behavior<A>, stream: Stream<Behavior<A>>
+// ): Behavior<Behavior<A>> {
+//   return fromFunction(() => new SwitcherBehavior(init, stream));
+// }
 
-class TestBehavior<A> extends Behavior<A> {
-  constructor(private semanticBehavior: SemanticBehavior<A>) {
-    super();
-  }
-  semantic(): SemanticBehavior<A> {
-    return this.semanticBehavior;
-  }
-}
+// class TestBehavior<A> extends Behavior<A> {
+//   constructor(private semanticBehavior: SemanticBehavior<A>) {
+//     super();
+//   }
+//   semantic(): SemanticBehavior<A> {
+//     return this.semanticBehavior;
+//   }
+// }
 
-export function testBehavior<A>(b: SemanticBehavior<A>): Behavior<A> {
-  return new TestBehavior(b);
-}
+// export function testBehavior<A>(b: SemanticBehavior<A>): Behavior<A> {
+//   return new TestBehavior(b);
+// }
 
-/** @private */
-class ActiveScanBehavior<A, B> extends ActiveBehavior<B> {
-  constructor(
-    private f: (a: A, b: B) => B, public last: B, private parent: Stream<A>
-  ) {
-    super();
-    this.state = State.Push;
-    parent.addListener(this);
-  }
-  push(val: A): void {
-    this.last = this.f(val, this.last);
-    if (this.child) {
-      this.child.push(this.last);
-    }
-  }
-}
+// /** @private */
+// class ActiveScanBehavior<A, B> extends ActiveBehavior<B> {
+//   constructor(
+//     private f: (a: A, b: B) => B, public last: B, private parent: Stream<A>
+//   ) {
+//     super();
+//     this.state = State.Push;
+//     parent.addListener(this);
+//   }
+//   push(val: A): void {
+//     this.last = this.f(val, this.last);
+//     if (this.child) {
+//       this.child.push(this.last);
+//     }
+//   }
+// }
 
-class ScanBehavior<A, B> extends StatefulBehavior<Behavior<B>> {
-  pull(): Behavior<B> {
-    return new ActiveScanBehavior(this.a, this.b, this.c);
-  }
-  semantic(): SemanticBehavior<Behavior<B>> {
-    const stream = this.c.semantic();
-    return (t1) => testBehavior<B>((t2) =>
-      stream
-        .filter(({ time }) => t1 <= time && time <= t2)
-        .map((o) => o.value)
-        .reduce((acc, cur) => this.a(cur, acc), this.b)
-    );
-  }
-}
+// class ScanBehavior<A, B> extends StatefulBehavior<Behavior<B>> {
+//   pull(): Behavior<B> {
+//     return new ActiveScanBehavior(this.a, this.b, this.c);
+//   }
+//   semantic(): SemanticBehavior<Behavior<B>> {
+//     const stream = this.c.semantic();
+//     return (t1) => testBehavior<B>((t2) =>
+//       stream
+//         .filter(({ time }) => t1 <= time && time <= t2)
+//         .map((o) => o.value)
+//         .reduce((acc, cur) => this.a(cur, acc), this.b)
+//     );
+//   }
+// }
 
-export function scan<A, B>(
-  f: (a: A, b: B) => B, initial: B, source: Stream<A>
-): Behavior<Behavior<B>> {
-  return new ScanBehavior<A, B>(f, initial, source);
-}
+// export function scan<A, B>(
+//   f: (a: A, b: B) => B, initial: B, source: Stream<A>
+// ): Behavior<Behavior<B>> {
+//   return new ScanBehavior<A, B>(f, initial, source);
+// }
 
-class IndexReactive<A> extends Reactive<A> {
-  constructor(
-    private index: number,
-    parent: Reactive<A>
-  ) {
-    super();
-    this.parents = cons(parent);
-  }
-  push(a: A): void {
-    (<any>this.child).pushIdx(a, this.index);
-  }
-}
+// class IndexReactive<A> extends Reactive<A> {
+//   constructor(
+//     private index: number,
+//     parent: Reactive<A>
+//   ) {
+//     super();
+//     this.parents = cons(parent);
+//   }
+//   push(a: A): void {
+//     (<any>this.child).pushIdx(a, this.index);
+//   }
+// }
 
-class ActiveScanCombineBehavior<A> extends ActiveBehavior<A> {
-  private accumulators: ((a: any, b: A) => A)[];
-  constructor(streams: ScanPair<A>[], public last: A) {
-    super();
-    this.state = State.Push;
-    this.accumulators = [];
-    for (let i = 0; i < streams.length; ++i) {
-      const [s, f] = streams[i];
-      this.accumulators.push(f);
-      const indexReactive = new IndexReactive(i, s);
-      indexReactive.addListener(this);
-      this.parents = cons(indexReactive, this.parents);
-    }
-  }
-  pushIdx(a: A, index: number): void {
-    this.last = this.accumulators[index](a, this.last);
-    if (this.child) {
-      this.child.push(this.last);
-    }
-  }
-}
+// class ActiveScanCombineBehavior<A> extends ActiveBehavior<A> {
+//   private accumulators: ((a: any, b: A) => A)[];
+//   constructor(streams: ScanPair<A>[], public last: A) {
+//     super();
+//     this.state = State.Push;
+//     this.accumulators = [];
+//     for (let i = 0; i < streams.length; ++i) {
+//       const [s, f] = streams[i];
+//       this.accumulators.push(f);
+//       const indexReactive = new IndexReactive(i, s);
+//       indexReactive.addListener(this);
+//       this.parents = cons(indexReactive, this.parents);
+//     }
+//   }
+//   pushIdx(a: A, index: number): void {
+//     this.last = this.accumulators[index](a, this.last);
+//     if (this.child) {
+//       this.child.push(this.last);
+//     }
+//   }
+// }
 
-class ScanCombineBehavior<B> extends StatefulBehavior<Behavior<B>> {
-  pull(): Behavior<B> {
-    return new ActiveScanCombineBehavior(this.a, this.b);
-  }
-}
+// class ScanCombineBehavior<B> extends StatefulBehavior<Behavior<B>> {
+//   pull(): Behavior<B> {
+//     return new ActiveScanCombineBehavior(this.a, this.b);
+//   }
+// }
 
-export type ScanPair<A> = [Stream<any>, (a: any, b: A) => A];
+// export type ScanPair<A> = [Stream<any>, (a: any, b: A) => A];
 
-export function scanCombine<B>(
-  pairs: ScanPair<B>[], initial: B
-): Behavior<Behavior<B>> {
-  return new ScanCombineBehavior<B>(pairs, initial);
-}
+// export function scanCombine<B>(
+//   pairs: ScanPair<B>[], initial: B
+// ): Behavior<Behavior<B>> {
+//   return new ScanCombineBehavior<B>(pairs, initial);
+// }
 
-const firstArg = (a, b) => a;
+// const firstArg = (a, b) => a;
 
-/**
- * Creates a Behavior whose value is the last occurrence in the stream.
- * @param initial - the initial value that the behavior has
- * @param steps - the stream that will change the value of the behavior
- */
-export function stepper<B>(initial: B, steps: Stream<B>): Behavior<Behavior<B>> {
-  return scan(firstArg, initial, steps);
-}
+// /**
+//  * Creates a Behavior whose value is the last occurrence in the stream.
+//  * @param initial - the initial value that the behavior has
+//  * @param steps - the stream that will change the value of the behavior
+//  */
+// export function stepper<B>(initial: B, steps: Stream<B>): Behavior<Behavior<B>> {
+//   return scan(firstArg, initial, steps);
+// }
 
-/**
- *
- * @param initial the initial value
- * @param turnOn the streams that turn the behavior on
- * @param turnOff the streams that turn the behavior off
- */
-export function toggle(
-  initial: boolean, turnOn: Stream<any>, turnOff: Stream<any>
-): Behavior<Behavior<boolean>> {
-  return stepper(initial, turnOn.mapTo(true).combine(turnOff.mapTo(false)));
-}
+// /**
+//  *
+//  * @param initial the initial value
+//  * @param turnOn the streams that turn the behavior on
+//  * @param turnOff the streams that turn the behavior off
+//  */
+// export function toggle(
+//   initial: boolean, turnOn: Stream<any>, turnOff: Stream<any>
+// ): Behavior<Behavior<boolean>> {
+//   return stepper(initial, turnOn.mapTo(true).combine(turnOff.mapTo(false)));
+// }
 
-export type SampleAt = <B>(b: Behavior<B>) => B;
+// export type SampleAt = <B>(b: Behavior<B>) => B;
 
-class MomentBehavior<A> extends Behavior<A> {
-  private sampleBound: SampleAt;
-  constructor(private f: (at: SampleAt) => A) {
-    super();
-    this.sampleBound = (b) => this.sample(b);
-  }
-  activate(): void {
-    try {
-      this.last = this.f(this.sampleBound);
-      this.state = State.Push;
-    } catch (error) {
-      if ("placeholder" in error) {
-        const placeholder = error.placeholder;
-        removeListenerParents(this, this.parents);
-        placeholder.addListener(this);
-        this.parents = cons(placeholder);
-      } else {
-        throw error;
-      }
-    }
-  }
-  push(): void {
-    removeListenerParents(this, this.parents);
-    this.parents = undefined;
-    this.child.push(this.last = this.f(this.sampleBound));
-  }
-  sample<B>(b: Behavior<B>): B {
-    b.addListener(this);
-    this.parents = cons(b, this.parents);
-    return b.at();
-  }
-}
+// class MomentBehavior<A> extends Behavior<A> {
+//   private sampleBound: SampleAt;
+//   constructor(private f: (at: SampleAt) => A) {
+//     super();
+//     this.sampleBound = (b) => this.sample(b);
+//   }
+//   activate(): void {
+//     try {
+//       this.last = this.f(this.sampleBound);
+//       this.state = State.Push;
+//     } catch (error) {
+//       if ("placeholder" in error) {
+//         const placeholder = error.placeholder;
+//         removeListenerParents(this, this.parents);
+//         placeholder.addListener(this);
+//         this.parents = cons(placeholder);
+//       } else {
+//         throw error;
+//       }
+//     }
+//   }
+//   push(): void {
+//     removeListenerParents(this, this.parents);
+//     this.parents = undefined;
+//     this.child.push(this.last = this.f(this.sampleBound));
+//   }
+//   sample<B>(b: Behavior<B>): B {
+//     b.addListener(this);
+//     this.parents = cons(b, this.parents);
+//     return b.at();
+//   }
+// }
 
-export function moment<A>(f: (sample: SampleAt) => A): Behavior<A> {
-  return new MomentBehavior(f);
-}
+// export function moment<A>(f: (sample: SampleAt) => A): Behavior<A> {
+//   return new MomentBehavior(f);
+// }

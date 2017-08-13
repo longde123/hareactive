@@ -26,15 +26,12 @@ export interface Observer<A> {
   changeStateDown(state: State): void;
 }
 
-export class PushOnlyObserver<A> {
-  constructor(private callback: (a: A) => void, private source: Reactive<A>) {
+export class PushOnlyObserver<A> implements Observer<A> {
+  constructor(public push: (a: A) => void, private source: Reactive<A>) {
     source.addListener(this);
     if (isBehavior(source) && source.state === State.Push) {
-      callback(source.at());
+      push(source.at());
     }
-  }
-  push(a: any): void {
-    this.callback(a);
   }
   deactivate(): void {
     this.source.removeListener(this);
@@ -149,12 +146,12 @@ export abstract class Reactive<A> implements Observer<any> {
   }
   observe(
     push: (a: A) => void,
-    beginPulling: () => void,
-    endPulling: () => void
+    beginPulling: (pull: () => void) => () => void
   ): CbObserver<A> {
-    return new CbObserver(push, beginPulling, endPulling, this);
+    return new CbObserver(push, beginPulling, this);
   }
   abstract push(a: any): void;
+  abstract pull(): void;
   activate(): void {
     this.state = addListenerParents(this, this.parents, State.Push);
   }
@@ -165,25 +162,22 @@ export abstract class Reactive<A> implements Observer<any> {
 }
 
 export class CbObserver<A> implements Observer<A> {
+  private _endPulling: () => void;
   constructor(
-    private _push: (a: A) => void,
-    private _beginPulling: () => void,
-    private _endPulling: () => void,
-    private source: Reactive<A>
+    public push: (a: A) => void,
+    private _beginPulling: (pull: () => void) => () => void,
+    public source: Reactive<A>
   ) {
     source.addListener(this);
     if (source.state === State.Pull || source.state === State.OnlyPull) {
-      _beginPulling();
+      this._endPulling = _beginPulling(source.pull.bind(source));
     } else if (isBehavior(source) && source.state === State.Push) {
-      _push(source.last);
+      push(source.last);
     }
-  }
-  push(a: A): void {
-    this._push(a);
   }
   changeStateDown(state: State): void {
     if (state === State.Pull || state === State.OnlyPull) {
-      this._beginPulling();
+      this._endPulling = this._beginPulling(this.source.pull.bind(this.source));
     } else {
       this._endPulling();
     }
@@ -202,9 +196,8 @@ export class CbObserver<A> implements Observer<A> {
  */
 export function observe<A>(
   push: (a: A) => void,
-  beginPulling: () => void,
-  endPulling: () => void,
+  beginPulling: (pull: () => void) => () => void,
   behavior: Behavior<A>
 ): CbObserver<A> {
-  return behavior.observe(push, beginPulling, endPulling);
+  return behavior.observe(push, beginPulling);
 }

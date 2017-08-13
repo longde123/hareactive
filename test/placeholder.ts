@@ -30,8 +30,10 @@ describe("placeholder", () => {
       const b = fromFunction(() => 12);
       observe(
         () => { throw new Error("should not be called"); },
-        () => beginPulling = true,
-        () => { throw new Error("should not be called"); },
+        () => {
+          beginPulling = true;
+          return () => { throw new Error("should not be called"); };
+        },
         p
       );
       assert.strictEqual(beginPulling, false);
