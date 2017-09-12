@@ -29,9 +29,6 @@ export interface Observer<A> {
 export class PushOnlyObserver<A> implements Observer<A> {
   constructor(public push: (a: A) => void, private source: Reactive<A>) {
     source.addListener(this);
-    if (isBehavior(source) && source.state === State.Push) {
-      push(source.at());
-    }
   }
   deactivate(): void {
     this.source.removeListener(this);

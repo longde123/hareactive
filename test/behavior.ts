@@ -99,6 +99,7 @@ describe("behavior", () => {
     it("pulls from time varying functions", () => {
       let time = 0;
       const b = fromFunction(() => time);
+      b.observe((v) => {}, () => () => {});
       assert.equal(B.at(b), 0);
       time = 1;
       assert.equal(B.at(b), 1);
@@ -109,10 +110,11 @@ describe("behavior", () => {
     });
   });
   describe("functor", () => {
-    describe.only("map", () => {
+    describe("map", () => {
       it("maps over initial value from parent", () => {
         const b = Behavior.of(3);
         const mapped = map(double, b);
+        mapped.subscribe(() => {});
         assert.strictEqual(at(mapped), 6);
       });
       it("maps constant function", () => {
@@ -134,6 +136,7 @@ describe("behavior", () => {
           return time;
         });
         const mapped = map(double, b);
+        mapped.subscribe(() => {});
         assert.equal(B.at(mapped), 0);
         time = 1;
         assert.equal(B.at(mapped), 2);
@@ -195,7 +198,7 @@ describe("behavior", () => {
         const fnB = fromFunction(() => fn);
         const numB = fromFunction(() => n);
         const applied = B.ap(fnB, numB);
-
+        applied.observe(v => {}, (pull) => () => {});
         assert.equal(B.at(applied), 6);
         fn = add(2);
         assert.equal(B.at(applied), 3);
@@ -213,6 +216,7 @@ describe("behavior", () => {
           return n;
         });
         const applied = B.ap(fnB, numE);
+        applied.observe((v) => {}, () => () => {});
         assert.equal(B.at(applied), 6);
         fnB.push(add(2));
         assert.equal(B.at(applied), 3);
@@ -230,6 +234,7 @@ describe("behavior", () => {
         const b2 = sinkBehavior(1);
         const b3 = sinkBehavior(1);
         const lifted = lift((a, b, c) => a * b + c, b1, b2, b3);
+        lifted.observe((v) => {}, () => () => {});
         assert.strictEqual(at(lifted), 2);
         b2.push(2);
         assert.strictEqual(at(lifted), 3);
@@ -244,11 +249,13 @@ describe("behavior", () => {
     it("handles a constant behavior", () => {
       const b1 = Behavior.of(12);
       const b2 = b1.chain(x => Behavior.of(x * x));
+      b2.observe((v) => {}, () => () => {});
       assert.strictEqual(at(b2), 144);
     });
     it("handles changing outer behavior", () => {
       const b1 = sinkBehavior(0);
       const b2 = b1.chain(x => Behavior.of(x * x));
+      b2.observe((v) => {}, () => () => {});
       assert.strictEqual(at(b2), 0);
       b1.push(2);
       assert.strictEqual(at(b2), 4);

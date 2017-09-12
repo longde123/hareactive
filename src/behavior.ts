@@ -74,11 +74,19 @@ export abstract class Behavior<A> extends Reactive<A> implements Observer<A>, Mo
   }
   flatten: <B>() => Behavior<B>;
   at(): A {
-    this.pull();
+    if (this.state !== State.Push) {
+      this.pull();
+    }
     return this.last;
   }
   activate(): void {
     super.activate();
+    if (isBehavior(this.parents.value)) {
+      const v = this.parents.value.at();
+      this.push(v);
+    } else {
+      this.push(undefined);
+    }
   }
   changePullers(n: number): void {
     this.nrOfPullers += n;
@@ -210,9 +218,15 @@ class ApBehavior<A, B> extends Behavior<B> {
   }
   private cacheFn: (a: A) => B;
   private cacheVal: A;
+  private disablePush: boolean = false;
   push(): void {
+    if (this.disablePush) {
+      return;
+    }
+    this.disablePush = true;
     const fn = at(this.fn);
     const val = at(this.val);
+    this.disablePush = false;
     if (fn === this.cacheFn && val === this.cacheVal) {
       return;
     }
@@ -383,8 +397,8 @@ export class ConstantBehavior<A> extends ActiveBehavior<A> {
     super();
     this.state = State.Push;
   }
-  push(): void {}
-  pull(): void {}
+  push(): void { }
+  pull(): void { }
   semantic(): SemanticBehavior<A> {
     return (_) => this.last;
   }
@@ -397,7 +411,12 @@ export class FunctionBehavior<A> extends ActiveBehavior<A> {
     this.state = State.OnlyPull;
   }
   push(): void {
-    this.child.push(this.fn());
+    const val = this.fn();
+    if (val === this.last) {
+      return;
+    }
+    this.last = val;
+    this.child.push(val);
   }
   pull(): void {
     this.push();
