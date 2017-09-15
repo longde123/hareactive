@@ -91,8 +91,8 @@ describe("behavior", () => {
       }, "");
       const observer = producer.subscribe((a) => a);
       observer.deactivate();
-      assert(activate.calledOnce);
-      assert(deactivate.calledOnce);
+      assert.isOk(activate.calledOnce, "activate was not called once");
+      assert.isOk(deactivate.calledOnce, "deactivate was not called once");
     });
   });
   describe("fromFunction", () => {
@@ -114,36 +114,37 @@ describe("behavior", () => {
       it("maps over initial value from parent", () => {
         const b = Behavior.of(3);
         const mapped = map(double, b);
-        mapped.subscribe(() => {});
-        assert.strictEqual(at(mapped), 6);
-      });
-      it("maps constant function", () => {
-        const b = sinkBehavior(0);
-        const mapped = map(double, b);
         const cb = spy();
         mapped.subscribe(cb);
-        publish(1, b);
-        assert.strictEqual(mapped.at(), 2);
-        publish(2, b);
-        assert.strictEqual(mapped.at(), 4);
-        publish(3, b);
-        assert.strictEqual(mapped.at(), 6);
-        assert.deepEqual(cb.args, [[0], [2], [4], [6]]);
+        assert.deepEqual(cb.args, [[6]]);
+      });
+      it("maps constant function", () => {
+        const b = sinkBehavior(1);
+        const mapped = map(double, b);
+        const cb = spy();
+        mapped.observe(cb, () => () => {});
+        b.push(2);
+        b.push(3);
+        b.push(4);
+        assert.deepEqual(cb.args, [[2], [4], [6], [8]]);
       });
       it("maps time function", () => {
+        const cb = spy();
         let time = 0;
         const b = B.fromFunction(() => {
           return time;
         });
         const mapped = map(double, b);
-        mapped.subscribe(() => {});
-        assert.equal(B.at(mapped), 0);
+        let pull;
+        mapped.observe(cb, (p) => pull = p);
+        pull();
         time = 1;
-        assert.equal(B.at(mapped), 2);
+        pull();
         time = 2;
-        assert.equal(B.at(mapped), 4);
+        pull();
         time = 3;
-        assert.equal(B.at(mapped), 6);
+        pull();
+        assert.deepEqual(cb.args, [[0], [2], [4], [6]]);
       });
       // it("has semantic representation", () => {
       //   const b = testBehavior((t) => t);
@@ -277,6 +278,7 @@ describe("behavior", () => {
       const inner = sinkBehavior(0);
       const outer = sinkBehavior(1);
       const b = outer.chain(n => n === 1 ? inner : Behavior.of(6));
+      b.observe((v) => {}, () => () => {});
       assert.strictEqual(at(b), 0);
       inner.push(2);
       assert.strictEqual(at(b), 2);
@@ -298,6 +300,7 @@ describe("behavior", () => {
           return inner2;
         }
       });
+      b.observe((v) => {}, () => () => {});
       assert.strictEqual(at(b), 0);
       outer.push(1);
       assert.strictEqual(at(b), 1);
@@ -364,7 +367,9 @@ describe("behavior", () => {
     it("can integrate", () => {
       const clock = useFakeTimers();
       const acceleration = sinkBehavior(1);
-      const integration = at(integrate(acceleration));
+      const i = integrate(acceleration);
+      const integration = at(i);
+      i.observe((v) => {}, () => () => {});
       assert.strictEqual(at(integration), 0);
       clock.tick(2000);
       assert.strictEqual(at(integration), 2);

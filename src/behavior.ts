@@ -1,8 +1,7 @@
-import { Cons, cons } from "./linkedlist";
+import { Cons, cons, Node } from "./linkedlist";
 import { Monad, monad } from "@funkia/jabz";
 import {
-  Observer, State, Reactive, Time, addListenerParents,
-  removeListenerParents, changePullersParents
+  Observer, State, Reactive, Time
 } from "./common";
 import { Future, BehaviorFuture } from "./future";
 import * as F from "./future";
@@ -17,21 +16,7 @@ export type SemanticBehavior<A> = (time: Time) => A;
 
 @monad
 export abstract class Behavior<A> extends Reactive<A> implements Observer<A>, Monad<A> {
-  // Push behaviors cache their last value in `last`.
-  // Pull behaviors do not use `last`.
   last: A;
-  nrOfListeners: number;
-  child: Observer<any>;
-  // The streams and behaviors that this behavior depends upon
-  dependencies: Cons<Reactive<any>>;
-  // Amount of nodes that wants to pull the behavior without actively
-  // listening for updates
-  nrOfPullers: number;
-
-  constructor() {
-    super();
-    this.nrOfPullers = 0;
-  }
   static is(a: any): a is Behavior<any> {
     return isBehavior(a);
   }
@@ -81,16 +66,36 @@ export abstract class Behavior<A> extends Reactive<A> implements Observer<A>, Mo
   }
   activate(): void {
     super.activate();
-    if (isBehavior(this.parents.value)) {
-      const v = this.parents.value.at();
-      this.push(v);
-    } else {
-      this.push(undefined);
+    const fParent = this.parents.value;
+    const fromLast = isBehavior(fParent) ? fParent.last : undefined;
+    this.last = this.refresh(fromLast);
+  }
+  push(a: any): void {
+    const newValue = this.refresh(a);
+    if (newValue === this.last) {
+      return;
+    }
+    this.last = newValue;
+    for (const child of this.children) {
+      child.push(newValue);
     }
   }
-  changePullers(n: number): void {
-    this.nrOfPullers += n;
-    changePullersParents(n, this.parents);
+  pull(): boolean {
+    let hasChanged: boolean = true;
+    if (this.parents !== undefined) {
+      hasChanged = false;
+      for (const parent of this.parents) {
+        hasChanged = (!hasChanged) ? parent.pull() : true;
+      }
+    }
+    if (hasChanged === true) {
+      const fParent = this.parents ? this.parents.value : undefined;
+      const fromLast = isBehavior(fParent) ? fParent.last : undefined;
+      const newValue = this.refresh(fromLast);
+      hasChanged = newValue !== this.last;
+      this.last = newValue;
+    }
+    return hasChanged;
   }
   semantic(): SemanticBehavior<A> {
     throw new Error("The behavior does not have a semantic representation");
@@ -106,14 +111,9 @@ export function isBehavior(b: any): b is Behavior<any> {
 }
 
 export abstract class ProducerBehavior<A> extends Behavior<A> {
-  push(a: A): void {
-    const changed = a !== this.last;
-    this.last = a;
-    if (this.state === State.Push && changed) {
-      this.child.push(a);
-    }
+  refresh(a: A): A {
+    return a;
   }
-  pull(): void { } // A producer is always push so we don't need to implement pull
   changePullers(n: number): void {
     this.nrOfPullers += n;
     if (this.nrOfPullers > 0 && this.state === State.Inactive) {
@@ -163,21 +163,6 @@ export function producerBehavior<A>(activate: ProducerBehaviorFunction<A>, initi
   return new ProducerBehaviorFromFunction(activate, initial);
 }
 
-export class SinkBehavior<A> extends ProducerBehavior<A> {
-  constructor(public last: A) {
-    super();
-  }
-  activateProducer(): void { }
-  deactivateProducer(): void { }
-}
-
-/**
- * Creates a behavior for imperative pushing.
- */
-export function sinkBehavior<A>(initial: A): SinkBehavior<A> {
-  return new SinkBehavior<A>(initial);
-}
-
 /**
  * Impure function that gets the current value of a behavior. For a
  * pure variant see `sample`.
@@ -187,23 +172,15 @@ export function at<B>(b: Behavior<B>): B {
 }
 
 export class MapBehavior<A, B> extends Behavior<B> {
-  constructor(private parent: Behavior<any>, private f: (a: A) => B) {
+  constructor(private source: Behavior<any>, private f: (a: A) => B) {
     super();
-    this.parents = cons(parent);
+    this.parents = cons<any>(source);
   }
-  push(a: A): void {
-    const b = this.f(a);
-    if (b === this.last) {
-      return;
-    }
-    this.last = b;
-    this.child.push(b);
-  }
-  pull(): void {
-    this.parent.pull();
+  refresh(a: A): B {
+    return this.f(a);
   }
   semantic(): SemanticBehavior<B> {
-    const g = this.parent.semantic();
+    const g = this.source.semantic();
     return (t) => this.f(g(t));
   }
 }
@@ -216,25 +193,10 @@ class ApBehavior<A, B> extends Behavior<B> {
     super();
     this.parents = cons<any>(fn, cons(val));
   }
-  private cacheFn: (a: A) => B;
-  private cacheVal: A;
-  private disablePush: boolean = false;
-  push(): void {
-    if (this.disablePush) {
-      return;
-    }
-    this.disablePush = true;
-    const fn = at(this.fn);
-    const val = at(this.val);
-    this.disablePush = false;
-    if (fn === this.cacheFn && val === this.cacheVal) {
-      return;
-    }
-    this.last = fn(val);
-    this.child.push(this.last);
-  }
-  pull(): void {
-    this.push();
+  refresh(): B {
+    const val = this.val.at();
+    const fn = this.fn.at();
+    return fn(val);
   }
 }
 
@@ -249,67 +211,44 @@ export function ap<A, B>(fnB: Behavior<(a: A) => B>, valB: Behavior<A>): Behavio
   return valB.ap(fnB);
 }
 
-class ChainOuter<A> extends Behavior<A> {
-  constructor(
-    public child: ChainBehavior<A, any>,
-    public parent: Behavior<any>
-  ) {
-    super();
-    this.parents = cons(parent);
-  }
-  push(a: A): void {
-    this.child.pushOuter(a);
-  }
-  pull(): void {
-    this.parent.pull();
-  }
-}
-
 class ChainBehavior<A, B> extends Behavior<B> {
   // The last behavior returned by the chain function
   private innerB: Behavior<B>;
-  private outerConsumer: Behavior<A>;
   constructor(
     private outer: Behavior<A>,
     private fn: (a: A) => Behavior<B>
   ) {
     super();
     // Create the outer consumer
-    this.outerConsumer = new ChainOuter(this, outer);
-    this.parents = cons(this.outerConsumer);
+    this.parents = cons(outer);
   }
-  activate(): void {
-    // Make the consumers listen to inner and outer behavior
-    this.outer.addListener(this.outerConsumer);
-    if (this.outer.state === State.Push) {
-      this.innerB = this.fn(this.outer.at());
-      this.innerB.addListener(this);
-      this.state = this.innerB.state;
-      this.last = at(this.innerB);
-    }
-  }
-  pushOuter(a: A): void {
-    // The outer behavior has changed. This means that we will have to
-    // call our function, which will result in a new inner behavior.
-    // We therefore stop listening to the old inner behavior and begin
-    // listening to the new one.
-    if (this.innerB !== undefined) {
-      this.innerB.removeListener(this);
-    }
-    const newInner = this.innerB = this.fn(a);
-    newInner.addListener(this);
-    this.state = newInner.state;
-    this.changeStateDown(this.state);
-    if (this.state === State.Push) {
-      this.push(newInner.at());
-    }
-  }
-  push(b: B): void {
-    this.last = b;
-    this.child.push(b);
-  }
-  pull(): void {
-    this.fn(this.outer.at()).pull();
+  // activate(): void {
+  //   // Make the consumers listen to inner and outer behavior
+  //   if (this.outer.state === State.Push) {
+  //     this.innerB = this.fn(this.outer.at());
+  //     this.innerB.addListener(this);
+  //     this.state = this.innerB.state;
+  //     this.last = at(this.innerB);
+  //   }
+  // }
+  // pushOuter(a: A): void {
+  //   // The outer behavior has changed. This means that we will have to
+  //   // call our function, which will result in a new inner behavior.
+  //   // We therefore stop listening to the old inner behavior and begin
+  //   // listening to the new one.
+  //   if (this.innerB !== undefined) {
+  //     this.innerB.removeListener(this);
+  //   }
+  //   const newInner = this.innerB = this.fn(a);
+  //   newInner.addListener(this);
+  //   this.state = newInner.state;
+  //   this.changeStateDown(this.state);
+  //   if (this.state === State.Push) {
+  //     this.push(newInner.at());
+  //   }
+  // }
+  refresh(a: any): B {
+    return this.fn(this.outer.at()).at();
   }
 }
 
@@ -397,11 +336,38 @@ export class ConstantBehavior<A> extends ActiveBehavior<A> {
     super();
     this.state = State.Push;
   }
-  push(): void { }
-  pull(): void { }
+  refresh(a: any): A {
+    throw "Makes no sense to call refresh on this behavior";
+  }
   semantic(): SemanticBehavior<A> {
     return (_) => this.last;
   }
+  push(a: any): void {
+    throw "Makes no sense to call push on this behavior";
+  }
+  pull(): boolean {
+    return false;
+  }
+}
+
+export class SinkBehavior<A> extends ActiveBehavior<A> {
+  constructor(public last: A) {
+    super();
+    this.state = State.Push;
+  }
+  refresh(a: A): A {
+    return a;
+  }
+  pull(): boolean {
+    return false;
+  }
+}
+
+/**
+ * Creates a behavior for imperative pushing.
+ */
+export function sinkBehavior<A>(initial: A): SinkBehavior<A> {
+  return new SinkBehavior<A>(initial);
 }
 
 /** @private */
@@ -410,16 +376,11 @@ export class FunctionBehavior<A> extends ActiveBehavior<A> {
     super();
     this.state = State.OnlyPull;
   }
-  push(): void {
-    const val = this.fn();
-    if (val === this.last) {
-      return;
-    }
-    this.last = val;
-    this.child.push(val);
+  refresh(a: any): A {
+    return this.fn();
   }
-  pull(): void {
-    this.push();
+  push(a: any): void {
+    throw "Makes no sense to call push on this behavior";
   }
 }
 
