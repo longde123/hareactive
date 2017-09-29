@@ -70,7 +70,6 @@ export abstract class Reactive<A> implements Observer<any> {
     }
   }
   activate(): void {
-    const that = this;
     for (const parent of this.parents) {
       const node = new Node(this);
       this.listenerNodes = cons({node, parent}, this.listenerNodes);

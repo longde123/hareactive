@@ -211,26 +211,43 @@ export function ap<A, B>(fnB: Behavior<(a: A) => B>, valB: Behavior<A>): Behavio
   return valB.ap(fnB);
 }
 
+class ChainOuter<A> extends Behavior<A> {
+  constructor(
+    public child: ChainBehavior<A, any>,
+    public parent: Behavior<A>
+  ) {
+    super();
+    this.parents = cons(parent);
+  }
+  push(a: A): void {
+    if (a === this.last) {
+      return;
+    }
+    this.last = a;
+    this.child.pushOuter(a);
+  }
+  refresh(a: A): A {
+    return a;
+  }
+  pull(): boolean {
+    return this.parent.pull();
+  }
+}
+
 class ChainBehavior<A, B> extends Behavior<B> {
   // The last behavior returned by the chain function
   private innerB: Behavior<B>;
+  private innerNode: Node<any> = new Node(this);
+  private outerConsumer: Behavior<A>;
   constructor(
     private outer: Behavior<A>,
     private fn: (a: A) => Behavior<B>
   ) {
     super();
     // Create the outer consumer
-    this.parents = cons(outer);
+    this.outerConsumer = new ChainOuter(this, outer);
+    this.parents = cons(this.outerConsumer);
   }
-  // activate(): void {
-  //   // Make the consumers listen to inner and outer behavior
-  //   if (this.outer.state === State.Push) {
-  //     this.innerB = this.fn(this.outer.at());
-  //     this.innerB.addListener(this);
-  //     this.state = this.innerB.state;
-  //     this.last = at(this.innerB);
-  //   }
-  // }
   // pushOuter(a: A): void {
   //   // The outer behavior has changed. This means that we will have to
   //   // call our function, which will result in a new inner behavior.
@@ -247,8 +264,21 @@ class ChainBehavior<A, B> extends Behavior<B> {
   //     this.push(newInner.at());
   //   }
   // }
-  refresh(a: any): B {
-    return this.fn(this.outer.at()).at();
+  pushOuter(a: any): void {
+    const newInnerB = this.fn(a);
+    if (newInnerB === this.innerB) {
+      return;
+    }
+    if (this.innerB !== undefined) {
+      this.innerB.removeListener(this.innerNode);
+    }
+    this.innerB = newInnerB;
+    newInnerB.addListener(this.innerNode);
+    this.parents = cons(this.outerConsumer, <any> cons(this.innerB));
+    this.push(this.innerB.at());
+  }
+  refresh(a: B): B {
+    return a;
   }
 }
 
