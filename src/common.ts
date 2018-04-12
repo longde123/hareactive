@@ -22,7 +22,7 @@ export const enum State {
 }
 
 export interface Observer<A> {
-  push(a: A): void;
+  push(n: number): void;
   changeStateDown(state: State): void;
 }
 
@@ -48,9 +48,12 @@ type NodeParentPair = {
 export abstract class Reactive<A> implements Observer<any> {
   state: State = State.Inactive;
   last: A;
+  pulledAt = 0;
+  changedAt = 0;
   children: LinkedList<Observer<A>> = new LinkedList();
-  parents: Cons<Reactive<any>>;
+  parents: Reactive<any>[];
   listenerNodes: Cons<NodeParentPair>;
+
   nrOfPullers: number = 0;
   addListener(node: Node<any>): void {
     this.children.append(node);
@@ -70,6 +73,7 @@ export abstract class Reactive<A> implements Observer<any> {
     }
   }
   activate(): void {
+    this.state = State.Push;
     for (const parent of this.parents) {
       const node = new Node(this);
       this.listenerNodes = cons({node, parent}, this.listenerNodes);
@@ -92,15 +96,14 @@ export abstract class Reactive<A> implements Observer<any> {
       parent.changePullers(n);
     }
   }
-  abstract refresh(b: any): A;
-  abstract pull(): boolean;
-  abstract push(a: any): void;
+  abstract pull(n: number): void;
+  abstract push(n: number): void;
   subscribe(callback: (a: A) => void): Subscriber<A> {
     return new PushOnlyObserver(callback, this);
   }
   observe(
     push: (a: A) => void,
-    beginPulling: (pull: () => void) => () => void
+    beginPulling: (pull: (n?: number) => void) => () => void
   ): CbObserver<A> {
     return new CbObserver(push, beginPulling, this);
   }
@@ -110,26 +113,28 @@ export class CbObserver<A> implements Observer<A> {
   private _endPulling: () => void;
   node: Node<Observer<A>> = new Node(this);
   constructor(
-    public push: (a: A) => void,
-    private _beginPulling: (pull: () => void) => () => void,
+    public refresh: (a: A) => void,
+    private _beginPulling: (pull: (n?: number) => void) => () => void,
     public source: Reactive<A>
   ) {
     source.addListener(this.node);
     if (source.state === State.Pull || source.state === State.OnlyPull) {
       this._endPulling = _beginPulling(this.pull.bind(this));
     }
-    if (isBehavior(source)) {
-      push(source.at());
+    if (source.state === State.Push) {
+      refresh(source.last);
     }
   }
-  pull(): void {
-    if (this.source.pull()) {
-      this.push(this.source.last);
-    }
+  push(n: number) {
+    this.refresh(this.source.last);
+  }
+  pull(n: number = Date.now()): void {
+    this.source.pull(n);
+    this.refresh(this.source.last);
   }
   changeStateDown(state: State): void {
     if (state === State.Pull || state === State.OnlyPull) {
-      this._endPulling = this._beginPulling(this.source.pull.bind(this.pull.bind(this)));
+      this._endPulling = this._beginPulling(this.pull.bind(this));
     } else {
       this._endPulling();
     }
@@ -138,11 +143,14 @@ export class CbObserver<A> implements Observer<A> {
 
 export class PushOnlyObserver<A> implements Observer<A> {
   node: Node<Observer<A>> = new Node(this);
-  constructor(public push: (a: A) => void, private source: Reactive<A>) {
+  constructor(public refresh: (a: A) => void, private source: Reactive<A>) {
     source.addListener(this.node);
-    if (isBehavior(source)) {
-      push(source.at());
+    if (source.state === State.Push) {
+      refresh(source.last);
     }
+  }
+  push() {
+    this.refresh(this.source.last);    
   }
   deactivate(): void {
     this.source.removeListener(this.node);
