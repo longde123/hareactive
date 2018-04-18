@@ -1,5 +1,12 @@
-import { testStreamFromObject } from "../src";
-import { Behavior, switchTo, when, scan } from "../src/behavior";
+import { testStreamFromObject, testStreamFromArray } from "../src";
+import {
+  Behavior,
+  switchTo,
+  when,
+  scan,
+  stepper,
+  isBehavior
+} from "../src/behavior";
 import { Future } from "../src/future";
 import {
   perform,
@@ -287,6 +294,33 @@ describe("Now", () => {
         assert.deepEqual(results, [1, 2]);
         done();
       });
+    });
+    it("can be tested", () => {
+      let requests: number[] = [];
+      const model = fgo(function*({ click }) {
+        const request = click.mapTo(
+          withEffects((n: number) => {
+            requests.push(n);
+            return n + 2;
+          })
+        );
+        const response = yield performStreamLatest(request);
+        const res = stepper("", response.map((e) => e.toString()));
+        return { res };
+      });
+      const click = testStreamFromArray([1, 2, 3, 4, 5]);
+      const out: { res: Behavior<Behavior<string>> } = testNow(
+        model({ click }),
+        [testStreamFromArray(["old", "old", "response"])]
+      );
+      assert(isBehavior(out.res));
+      assert.equal(
+        out.res
+          .semantic()(0)
+          .semantic()(4),
+        "response"
+      );
+      assert.deepEqual(requests, []);
     });
   });
 
