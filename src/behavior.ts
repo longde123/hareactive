@@ -55,7 +55,7 @@ export abstract class Behavior<A> extends Reactive<A> implements Observer<A>, Mo
   static multi: boolean = true;
   multi: boolean = true;
   chain<B>(fn: (a: A) => Behavior<B>): Behavior<B> {
-    return //new ChainBehavior<A, B>(this, fn);
+    return new ChainBehavior<A, B>(this, fn);
   }
   flatten: <B>() => Behavior<B>;
   at(n = Date.now()): A {
@@ -223,9 +223,10 @@ export function ap<A, B>(fnB: Behavior<(a: A) => B>, valB: Behavior<A>): Behavio
 //     public parent: Behavior<A>
 //   ) {
 //     super();
-//     this.parents = cons(parent);
+//     this.parents = [parent];
 //   }
-//   push(a: A): void {
+//   push(n: number): void {
+//     const a = this.parent.last;
 //     if (a === this.last) {
 //       return;
 //     }
@@ -239,6 +240,40 @@ export function ap<A, B>(fnB: Behavior<(a: A) => B>, valB: Behavior<A>): Behavio
 //     return this.parent.pull();
 //   }
 // }
+
+class ChainBehavior<A, B> extends Behavior<B> {
+  // The last behavior returned by the chain function
+  private innerB: Behavior<B>;
+  private innerNode = Node.of(this);
+  private lastA;
+
+  constructor(
+    private outer: Behavior<A>,
+    private fn: (a: A) => Behavior<B>
+  ) {
+    super();
+    // Create the outer consumer
+    // this.outerConsumer = new ChainOuter(this, outer);
+    this.parents = [outer];
+  }
+  refresh(a) { 
+    if (a !== this.lastA) {
+      if (this.innerB !== undefined) {
+        this.innerB.removeListener(this.innerNode);
+      }
+      this.lastA = a;
+      this.innerB = this.fn(a);
+      this.innerB.addListener(this.innerNode);
+      if (this.state !== this.innerB.state) {
+        console.log(this.innerB.constructor.name, this.state, this.innerB.state);        
+        this.state = this.innerB.state;
+        this.changeStateDown(this.state);
+      }
+      this.parents.splice(1, 1, this.innerB);
+    }
+    return this.innerB.last;
+  }
+}
 
 // class ChainBehavior<A, B> extends Behavior<B> {
 //   // The last behavior returned by the chain function
@@ -292,18 +327,21 @@ export function ap<A, B>(fnB: Behavior<(a: A) => B>, valB: Behavior<A>): Behavio
 // class WhenBehavior extends Behavior<Future<{}>> {
 //   constructor(private parent: Behavior<boolean>) {
 //     super();
-//     this.push(at(parent));
+//     // this.push(at(parent));
 //   }
-//   push(val: boolean): void {
-//     if (val === true) {
-//       this.last = Future.of({});
-//     } else {
-//       this.last = new BehaviorFuture(this.parent);
-//     }
+//   refresh(val: boolean) {
+    
 //   }
-//   pull(): Future<{}> {
-//     return this.last;
-//   }
+//   // push(val: boolean): void {
+//   //   if (val === true) {
+//   //     this.last = Future.of({});
+//   //   } else {
+//       // this.last = new BehaviorFuture(this.parent);
+//   //   }
+//   // }
+//   // pull(): Future<{}> {
+//   //   return this.last;
+//   // }
 // }
 
 // export function when(b: Behavior<boolean>): Behavior<Future<{}>> {
@@ -360,12 +398,12 @@ export abstract class ActiveBehavior<A> extends Behavior<A> {
   changePullers(): void { }
 }
 
-// export abstract class StatefulBehavior<A> extends ActiveBehavior<A> {
-//   constructor(protected a: any, protected b?: any, protected c?: any) {
-//     super();
-//     this.state = State.OnlyPull;
-//   }
-// }
+export abstract class StatefulBehavior<A> extends ActiveBehavior<A> {
+  constructor(protected a: any, protected b?: any, protected c?: any) {
+    super();
+    this.state = State.OnlyPull;
+  }
+}
 
 export class ConstantBehavior<A> extends ActiveBehavior<A> {
   constructor(public last: A) {

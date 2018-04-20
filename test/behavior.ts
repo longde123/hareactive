@@ -201,154 +201,151 @@ describe("behavior", () => {
         const numB = B.fromFunction(() => n);
         const applied = B.ap(fnB, numB);
         applied.observe(v => {}, (p) => () => {});
-        assert.equal(B.at(applied), 6);
+        assert.equal(B.at(applied, 1), 6);
         fn = add(2);
-        assert.equal(B.at(applied), 3);
+        assert.equal(B.at(applied,2), 3);
         n = 4;
-        assert.equal(B.at(applied), 6);
+        assert.equal(B.at(applied,3), 6);
         fn = double;
-        assert.equal(B.at(applied), 8);
+        assert.equal(B.at(applied,4), 8);
         n = 8;
-        assert.equal(B.at(applied), 16);
+        assert.equal(B.at(applied,5), 16);
       });
-//       it("applies pushed event of functions to pulled event of numbers", () => {
-//         let n = 1;
-//         const fnB = sinkBehavior(add(5));
-//         const numE = B.fromFunction(() => {
-//           return n;
-//         });
-//         const applied = B.ap(fnB, numE);
-//         applied.observe((v) => {}, () => () => {});
-//         assert.equal(B.at(applied), 6);
-//         fnB.push(add(2));
-//         assert.equal(B.at(applied), 3);
-//         n = 4;
-//         assert.equal(B.at(applied), 6);
-//         fnB.push(double);
-//         assert.equal(B.at(applied), 8);
-//         n = 8;
-//         assert.equal(B.at(applied), 16);
-//       });
+      it("applies pushed event of functions to pulled event of numbers", () => {
+        let n = 1;
+        const fnB = sinkBehavior(add(5));
+        const numE = B.fromFunction(() => {
+          return n;
+        });
+        const applied = B.ap(fnB, numE);
+        applied.observe((v) => {}, () => () => {});
+        assert.equal(B.at(applied, 1), 6);
+        fnB.publish(add(2));
+        assert.equal(B.at(applied, 2), 3);
+        n = 4;
+        assert.equal(B.at(applied, 3), 6);
+        fnB.publish(double);
+        assert.equal(B.at(applied, 4), 8);
+        n = 8;
+        assert.equal(B.at(applied, 5), 16);
+      });
     });
-//     describe("lift", () => {
-//       it("lifts function of three arguments", () => {
-//         const b1 = sinkBehavior(1);
-//         const b2 = sinkBehavior(1);
-//         const b3 = sinkBehavior(1);
-//         const lifted = lift((a, b, c) => a * b + c, b1, b2, b3);
-//         lifted.observe((v) => {}, () => () => {});
-//         assert.strictEqual(at(lifted), 2);
-//         b2.push(2);
-//         assert.strictEqual(at(lifted), 3);
-//         b1.push(3);
-//         assert.strictEqual(at(lifted), 7);
-//         b3.push(3);
-//         assert.strictEqual(at(lifted), 9);
-//       });
-//     });
+    describe("lift", () => {
+      it("lifts function of three arguments", () => {
+        const b1 = sinkBehavior(1);
+        const b2 = sinkBehavior(1);
+        const b3 = sinkBehavior(1);
+        const lifted = lift((a, b, c) => a * b + c, b1, b2, b3);
+        lifted.observe((v) => {}, () => () => {});
+        assert.strictEqual(at(lifted,1), 2);
+        b2.publish(2);
+        assert.strictEqual(at(lifted,2), 3);
+        b1.publish(3);
+        assert.strictEqual(at(lifted,3), 7);
+        b3.publish(3);
+        assert.strictEqual(at(lifted,4), 9);
+      });
+    });
   });
-//   describe("chain", () => {
-//     it("handles a constant behavior", () => {
-//       const b1 = Behavior.of(12);
-//       const b2 = b1.chain(x => Behavior.of(x * x));
-//       b2.observe((v) => {}, () => () => {});
-//       assert.strictEqual(at(b2), 144);
-//     });
-//     it("handles changing outer behavior", () => {
-//       const b1 = sinkBehavior(0);
-//       const b2 = b1.chain(x => Behavior.of(x * x));
-//       b2.observe((v) => {}, () => () => {});
-//       assert.strictEqual(at(b2), 0);
-//       b1.push(2);
-//       assert.strictEqual(at(b2), 4);
-//       b1.push(3);
-//       assert.strictEqual(at(b2), 9);
-//     });
-//     it("handles changing inner behavior", () => {
-//       const inner = sinkBehavior(0);
-//       const b = Behavior.of(1).chain(_ => inner);
-//       const cb = spy();
-//       b.observe(cb, () => () => {});
-//       // assert.strictEqual(at(b), 0);
-//       inner.push(2);
-//       // assert.strictEqual(at(b), 2);
-//       inner.push(3);
-//       // assert.strictEqual(at(b), 3);
-//       assert.deepEqual(cb.args, [[0], [2], [3]]);
-//     });
-//     it("stops subscribing to past inner behavior", () => {
-//       const inner = sinkBehavior(0);
-//       const outer = sinkBehavior(1);
-//       const b = outer.chain(n => n === 1 ? inner : Behavior.of(6));
-//       b.observe((v) => {}, () => () => {});
-//       assert.strictEqual(at(b), 0);
-//       inner.push(2);
-//       assert.strictEqual(at(b), 2);
-//       outer.push(2);
-//       assert.strictEqual(at(b), 6);
-//       inner.push(3);
-//       assert.strictEqual(at(b), 6);
-//     });
-//     it("handles changes from both inner and outer", () => {
-//       const outer = sinkBehavior(0);
-//       const inner1 = sinkBehavior(1);
-//       const inner2 = sinkBehavior(3);
-//       const b = outer.chain(n => {
-//         if (n === 0) {
-//           return Behavior.of(0);
-//         } else if (n === 1) {
-//           return inner1;
-//         } else if (n === 2) {
-//           return inner2;
-//         }
-//       });
-//       b.observe((v) => {}, () => () => {});
-//       assert.strictEqual(at(b), 0);
-//       outer.push(1);
-//       assert.strictEqual(at(b), 1);
-//       inner1.push(2);
-//       assert.strictEqual(at(b), 2);
-//       outer.push(2);
-//       assert.strictEqual(at(b), 3);
-//       inner1.push(7); // Pushing to previous inner should have no effect
-//       assert.strictEqual(at(b), 3);
-//       inner2.push(4);
-//       assert.strictEqual(at(b), 4);
-//     });
-//     it("can switch between pulling and pushing", () => {
-//       const pushingB = sinkBehavior(0);
-//       let variable = 7;
-//       const pullingB = fromFunction(() => variable);
-//       const outer = sinkBehavior(true);
-//       const chained = outer.chain((b) => b ? pushingB : pullingB);
-//       const pushSpy = spy();
-//       const beginPullingSpy = spy();
-//       const endPullingSpy = spy();
-//       const pullHandler = () => { beginPullingSpy(); return endPullingSpy; };
-//       // Test that several observers are notified
-//       chained.observe(pushSpy, pullHandler);
-//       chained.observe(pushSpy, pullHandler);
-//       chained.observe(pushSpy, pullHandler);
-//       pushingB.push(1);
-//       pushingB.push(2);
-//       outer.push(false);
-//       assert.strictEqual(at(chained), 7);
-//       variable = 8;
-//       assert.strictEqual(at(chained), 8);
-//       pushingB.push(3);
-//       pushingB.push(4);
-//       outer.push(true);
-//       pushingB.push(5);
-//       outer.push(false);
-//       variable = 9;
-//       assert.strictEqual(at(chained), 9);
-//       assert.deepEqual(
-//         pushSpy.args,
-//         [[0], [0], [0], [1], [1], [1], [2], [2], [2], [4], [4], [4], [5], [5], [5]]
-//       );
-//       assert.equal(beginPullingSpy.callCount, 6);
-//       assert.equal(endPullingSpy.callCount, 3);
-//     });
+  describe("chain", () => {
+    it("handles a constant behavior", () => {
+      const b1 = Behavior.of(12);
+      const b2 = b1.chain(x => Behavior.of(x * x));
+      b2.observe((v) => {}, () => () => {});
+      assert.strictEqual(at(b2), 144);
+    });
+    it("handles changing outer behavior", () => {
+      const b1 = sinkBehavior(0);
+      const b2 = b1.chain(x => Behavior.of(x * x));
+      b2.observe((v) => {}, () => () => {});
+      assert.strictEqual(at(b2,1), 0);
+      b1.publish(2, 2);
+      assert.strictEqual(at(b2,3), 4);
+      b1.publish(3, 4);
+      assert.strictEqual(at(b2,5), 9);
+    });
+    it("handles changing inner behavior", () => {
+      const inner = sinkBehavior(0);
+      const b = Behavior.of(1).chain(_ => inner);
+      const cb = spy();
+      b.observe(cb, () => () => {});
+      inner.publish(2, 1);
+      inner.publish(3, 2);
+      assert.deepEqual(cb.args, [[0], [2], [3]]);
+    });
+    it("stops subscribing to past inner behavior", () => {
+      const inner = sinkBehavior(0);
+      const outer = sinkBehavior(1);
+      const b = outer.chain(n => n === 1 ? inner : Behavior.of(6));
+      b.observe((v) => {}, () => () => {});
+      assert.strictEqual(at(b,1), 0);
+      inner.publish(2,2);
+      assert.strictEqual(at(b,3), 2);
+      outer.publish(2,4);
+      assert.strictEqual(at(b,5), 6);
+      inner.publish(3,6);
+      assert.strictEqual(at(b,7), 6);
+    });
+    it("handles changes from both inner and outer", () => {
+      const outer = sinkBehavior(0);
+      const inner1 = sinkBehavior(1);
+      const inner2 = sinkBehavior(3);
+      const b = outer.chain(n => {
+        if (n === 0) {
+          return Behavior.of(0);
+        } else if (n === 1) {
+          return inner1;
+        } else if (n === 2) {
+          return inner2;
+        }
+      });
+      b.observe((v) => {}, () => () => {});
+      assert.strictEqual(at(b,1 ), 0);
+      outer.publish(1,2);
+      assert.strictEqual(at(b,3), 1);
+      inner1.publish(2,4);
+      assert.strictEqual(at(b,5), 2);
+      outer.publish(2,6);
+      assert.strictEqual(at(b,7), 3);
+      inner1.publish(7,8); // Pushing to previous inner should have no effect
+      assert.strictEqual(at(b,9), 3);
+      inner2.publish(4,10);
+      assert.strictEqual(at(b,11), 4);
+    });
+    it("can switch between pulling and pushing", () => {
+      const pushingB = B.sinkBehavior(0);
+      let variable = 7;
+      const pullingB = B.fromFunction(() => variable);
+      const outer = B.sinkBehavior(true);
+      const chained = outer.chain((b) => b ? pushingB : pullingB);
+      const pushSpy = spy();
+      const beginPullingSpy = spy();
+      const endPullingSpy = spy();
+      const pullHandler = () => { beginPullingSpy(); return endPullingSpy; };
+      // Test that several observers are notified
+      chained.observe(pushSpy, pullHandler);
+      chained.observe(pushSpy, pullHandler);
+      chained.observe(pushSpy, pullHandler);
+      pushingB.publish(1, 1);
+      pushingB.publish(2, 2);
+      outer.publish(false, 3);
+      assert.strictEqual(at(chained, 4), 7);
+      variable = 8;
+      assert.strictEqual(at(chained, 5), 8);
+      pushingB.publish(3, 6);
+      pushingB.publish(4, 7);
+      outer.publish(true, 8);
+      pushingB.publish(5, 9);
+      outer.publish(false, 10);
+      variable = 9;
+      assert.strictEqual(at(chained, 11), 9);
+      assert.deepEqual(
+        pushSpy.args,
+        [[0], [0], [0], [1], [1], [1], [2], [2], [2], [4], [4], [4], [5], [5], [5]]
+      );
+      assert.equal(beginPullingSpy.callCount, 6);
+      assert.equal(endPullingSpy.callCount, 3);
+    });
 //     it("works with go-notation", () => {
 //       const a = sinkBehavior(1);
 //       const b = go(function* (): IterableIterator<any> {
@@ -364,7 +361,7 @@ describe("behavior", () => {
 //       const b2 = b1.chain(x => Behavior.of(x * x));
 //       b2.changePullers(1);
 //     });
-//   });
+  });
 //   describe("integrate", () => {
 //     it("can integrate", () => {
 //       const clock = useFakeTimers();
